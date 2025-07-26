@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 250" role="img" aria-label="polisimのアーキテクチャ図">
+  <title>polisimのアーキテクチャ</title>
+  <style>
+    .box { fill: none; stroke: #8b949e; stroke-width: 1.5; }
+    .accent-box { fill: none; stroke: #6b79ec; stroke-width: 1.5; }
+    .label { font: 600 14px 'Hiragino Sans', 'Noto Sans JP', sans-serif; fill: #6b7280; }
+    .small { font: 400 11.5px 'Hiragino Sans', 'Noto Sans JP', sans-serif; fill: #6b7280; }
+    .accent-label { font: 700 14px 'Hiragino Sans', 'Noto Sans JP', sans-serif; fill: #5663d9; }
+    .arrow { stroke: #8b949e; stroke-width: 1.5; fill: none; marker-end: url(#head); }
+  </style>
+  <defs>
+    <marker id="head" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0L8 4L0 8z" fill="#8b949e"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="30" width="160" height="64" rx="8" class="box"/>
+  <text x="40" y="56" class="label">ポリシーJSON</text>
+  <text x="40" y="78" class="small">エディタで編集</text>
+
+  <rect x="20" y="140" width="160" height="80" rx="8" class="box"/>
+  <text x="40" y="166" class="label">リクエスト</text>
+  <text x="40" y="188" class="small">action / resource</text>
+  <text x="40" y="204" class="small">コンテキストキー</text>
+
+  <rect x="240" y="30" width="150" height="64" rx="8" class="accent-box"/>
+  <text x="260" y="56" class="accent-label">parsePolicy</text>
+  <text x="260" y="78" class="small">検証と正規化</text>
+
+  <rect x="450" y="86" width="180" height="96" rx="8" class="accent-box"/>
+  <text x="470" y="112" class="accent-label">evaluate</text>
+  <text x="470" y="134" class="small">アクション・リソース照合</text>
+  <text x="470" y="150" class="small">条件演算子の評価</text>
+  <text x="470" y="166" class="small">Deny優先の決定</text>
+
+  <rect x="690" y="86" width="160" height="96" rx="8" class="box"/>
+  <text x="710" y="112" class="label">EvaluationResult</text>
+  <text x="710" y="134" class="small">decision</text>
+  <text x="710" y="150" class="small">StatementTrace[]</text>
+
+  <rect x="880" y="98" width="60" height="72" rx="8" class="box"/>
+  <text x="894" y="128" class="label">UI</text>
+  <text x="888" y="150" class="small">描画</text>
+
+  <path class="arrow" d="M180 62 H232"/>
+  <path class="arrow" d="M390 62 C420 62 425 100 442 110"/>
+  <path class="arrow" d="M180 180 C220 180 410 160 442 148"/>
+  <path class="arrow" d="M630 134 H682"/>
+  <path class="arrow" d="M850 134 H872"/>
+</svg>
