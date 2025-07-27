@@ -5,8 +5,32 @@ import { parsePolicy } from './lib/policy';
 import { evaluate, type Decision, type EvaluationResult } from './lib/evaluate';
 import type { ConditionCheck } from './lib/condition';
 import { EXAMPLES } from './lib/examples';
+import { decodeState, encodeState } from './lib/share';
+import {
+  choiceLabel,
+  isThemeChoice,
+  nextChoice,
+  resolveTheme,
+  type ThemeChoice,
+} from './lib/theme';
 
 const STORAGE_KEY = 'polisim:v1';
+const THEME_KEY = 'polisim:theme';
+const HASH_PREFIX = '#s=';
+
+const DECISION_TEXT: Record<Decision, string> = {
+  'explicit-deny': '明示的な拒否(Explicit Deny)',
+  allow: '許可(Allow)',
+  'implicit-deny': '暗黙的な拒否(Implicit Deny)',
+};
+
+const THEME_ICONS: Record<ThemeChoice, string> = {
+  system:
+    '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4" stroke-linecap="round"/></svg>',
+  light:
+    '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.2 5.2l1.7 1.7M17.1 17.1l1.7 1.7M18.8 5.2l-1.7 1.7M6.9 17.1l-1.7 1.7" stroke-linecap="round"/></svg>',
+  dark: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 13.5A7.5 7.5 0 1 1 10.5 4a6 6 0 0 0 9.5 9.5Z" stroke-linejoin="round"/></svg>',
+};
 
 interface SavedState {
   policy: string;
@@ -144,12 +168,41 @@ function bannerHtml(result: EvaluationResult, traces: EvaluationResult['traces']
   </div>`;
 }
 
+// 評価結果を貼り付け可能なテキストにまとめる(コピー用)
+function resultToText(
+  result: EvaluationResult,
+  request: { action: string; resource: string },
+): string {
+  const lines = [
+    `決定: ${DECISION_TEXT[result.decision]}`,
+    `アクション: ${request.action || '(未指定)'}`,
+    `リソース: ${request.resource || '(未指定)'}`,
+    '',
+  ];
+  result.traces.forEach((trace, i) => {
+    const state = result.decidedBy.includes(i) ? '結論を決定' : trace.applied ? '適用' : '不適用';
+    const sid = trace.sid ? `(${trace.sid})` : '';
+    lines.push(`Statement ${i + 1}${sid}: ${trace.effect} / ${state}`);
+  });
+  return lines.join('\n');
+}
+
 export function mountApp(root: HTMLElement): void {
   root.innerHTML = `
   <header class="site-header">
-    <div class="brand">${BRAND_MARK}<span class="brand-name">polisim</span></div>
-    <p class="tagline">IAMポリシーの許可・拒否がどう決まるかを、ステートメント単位で追跡するシミュレータ</p>
+    <div class="brand">
+      ${BRAND_MARK}
+      <div class="brand-text">
+        <span class="kicker">IAM policy evaluation</span>
+        <span class="brand-name">polisim</span>
+      </div>
+    </div>
+    <button type="button" id="theme-toggle" class="theme-toggle">
+      <span class="theme-toggle-icon" id="theme-icon"></span>
+      <span id="theme-label"></span>
+    </button>
   </header>
+  <p class="tagline">ポリシーとリクエストを入力すると、許可・拒否がどのステートメントで決まるかを、明示的Deny優先のルールに沿ってステートメント単位で追跡します。判定はすべてブラウザ内で完結します。</p>
   <main>
     <section class="pane" aria-labelledby="policy-heading">
       <div class="pane-head">
@@ -181,7 +234,13 @@ export function mountApp(root: HTMLElement): void {
       <div id="context-rows"></div>
     </section>
     <section class="pane result-pane" aria-labelledby="result-heading">
-      <h2 id="result-heading">評価結果</h2>
+      <div class="pane-head">
+        <h2 id="result-heading">評価結果</h2>
+        <div class="result-actions">
+          <button type="button" id="share" class="ghost">共有リンク</button>
+          <button type="button" id="copy-result" class="ghost">結果をコピー</button>
+        </div>
+      </div>
       <div id="result"></div>
     </section>
   </main>
@@ -198,6 +257,50 @@ export function mountApp(root: HTMLElement): void {
   const rowsEl = root.querySelector('#context-rows') as HTMLDivElement;
   const resultEl = root.querySelector('#result') as HTMLDivElement;
   const addContextEl = root.querySelector('#add-context') as HTMLButtonElement;
+  const themeToggleEl = root.querySelector('#theme-toggle') as HTMLButtonElement;
+  const themeIconEl = root.querySelector('#theme-icon') as HTMLSpanElement;
+  const themeLabelEl = root.querySelector('#theme-label') as HTMLSpanElement;
+  const shareEl = root.querySelector('#share') as HTMLButtonElement;
+  const copyResultEl = root.querySelector('#copy-result') as HTMLButtonElement;
+
+  let lastResult: EvaluationResult | undefined;
+  let lastRequest = { action: '', resource: '' };
+
+  let themeChoice: ThemeChoice = (() => {
+    try {
+      const stored = localStorage.getItem(THEME_KEY);
+      return isThemeChoice(stored) ? stored : 'system';
+    } catch {
+      return 'system';
+    }
+  })();
+
+  function applyTheme(): void {
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.dataset.theme = resolveTheme(themeChoice, prefersDark);
+    themeIconEl.innerHTML = THEME_ICONS[themeChoice];
+    themeLabelEl.textContent =
+      themeChoice === 'system' ? '自動' : themeChoice === 'light' ? 'ライト' : 'ダーク';
+    themeToggleEl.setAttribute('aria-label', `${choiceLabel(themeChoice)}(クリックで切替)`);
+    themeToggleEl.setAttribute('title', choiceLabel(themeChoice));
+  }
+
+  async function copyText(text: string, button: HTMLButtonElement, done: string): Promise<void> {
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch {
+      ok = false;
+    }
+    const original = button.textContent ?? '';
+    button.textContent = ok ? done : 'コピーできません';
+    button.classList.toggle('is-done', ok);
+    window.setTimeout(() => {
+      button.textContent = original;
+      button.classList.remove('is-done');
+    }, 1500);
+  }
 
   function addContextRow(key = '', value = ''): void {
     const row = document.createElement('div');
@@ -277,11 +380,14 @@ export function mountApp(root: HTMLElement): void {
     }
     errorsEl.hidden = true;
     errorsEl.innerHTML = '';
-    const result = evaluate(policy, {
+    const request = {
       action: actionEl.value.trim(),
       resource: resourceEl.value.trim(),
       context: contextMap(),
-    });
+    };
+    const result = evaluate(policy, request);
+    lastResult = result;
+    lastRequest = { action: request.action, resource: request.resource };
     resultEl.innerHTML =
       bannerHtml(result, result.traces) +
       flowSvg(result.decision) +
@@ -318,13 +424,60 @@ export function mountApp(root: HTMLElement): void {
   }
   rowsEl.addEventListener('input', run);
 
-  const saved = loadState();
-  if (saved) {
-    policyEl.value = saved.policy;
-    actionEl.value = saved.action;
-    resourceEl.value = saved.resource;
-    for (const { key, value } of saved.context) addContextRow(key, value);
+  themeToggleEl.addEventListener('click', () => {
+    themeChoice = nextChoice(themeChoice);
+    try {
+      localStorage.setItem(THEME_KEY, themeChoice);
+    } catch {
+      // 保存できない環境でも切り替え自体は機能する
+    }
+    applyTheme();
+  });
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyTheme());
+
+  shareEl.addEventListener('click', () => {
+    const encoded = encodeState({
+      policy: policyEl.value,
+      action: actionEl.value,
+      resource: resourceEl.value,
+      context: readContextRows(),
+    });
+    history.replaceState(null, '', `${location.pathname}${HASH_PREFIX}${encoded}`);
+    void copyText(
+      `${location.origin}${location.pathname}${HASH_PREFIX}${encoded}`,
+      shareEl,
+      'リンクをコピーしました',
+    );
+  });
+
+  copyResultEl.addEventListener('click', () => {
+    if (!lastResult) return;
+    void copyText(resultToText(lastResult, lastRequest), copyResultEl, 'コピーしました');
+  });
+
+  function applyState(state: {
+    policy: string;
+    action: string;
+    resource: string;
+    context: { key: string; value: string }[];
+  }): void {
+    policyEl.value = state.policy;
+    actionEl.value = state.action;
+    resourceEl.value = state.resource;
+    rowsEl.innerHTML = '';
+    for (const { key, value } of state.context) addContextRow(key, value);
     run();
+  }
+
+  applyTheme();
+
+  const shared =
+    location.hash.startsWith(HASH_PREFIX) && decodeState(location.hash.slice(HASH_PREFIX.length));
+  const saved = loadState();
+  if (shared) {
+    applyState(shared);
+  } else if (saved) {
+    applyState(saved);
   } else {
     const first = EXAMPLES[0];
     if (first) {
