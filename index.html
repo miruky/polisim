@@ -7,8 +7,28 @@
       name="description"
       content="IAMポリシーJSONの許可・拒否評価過程をブラウザ内で可視化するシミュレータ"
     />
+    <meta name="theme-color" content="#f4f3ee" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#14161b" media="(prefers-color-scheme: dark)" />
+    <meta property="og:title" content="polisim — IAMポリシー評価シミュレータ" />
+    <meta
+      property="og:description"
+      content="IAMポリシーの許可・拒否がどのステートメントで決まるかをブラウザ内で追跡する。"
+    />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <title>polisim — IAMポリシー評価シミュレータ</title>
+    <script>
+      // 描画前にテーマを確定してチラつき(FOUC)を防ぐ
+      (function () {
+        try {
+          var stored = localStorage.getItem('polisim:theme');
+          var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.dataset.theme =
+            stored === 'light' || stored === 'dark' ? stored : dark ? 'dark' : 'light';
+        } catch (e) {
+          /* localStorageが使えない環境では既定の配色にフォールバック */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>
